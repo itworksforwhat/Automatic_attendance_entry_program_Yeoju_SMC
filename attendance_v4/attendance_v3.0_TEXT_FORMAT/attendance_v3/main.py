@@ -2,28 +2,37 @@
 근태 자동 입력 v3.0 - 메인
 """
 import pandas as pd
+import traceback
 from datetime import datetime
 from tkinter import messagebox
 import os
 
-from config import *
+from config import (
+    YEOJU_BLOCKS, SMC_BLOCKS,
+    CLEAR_RANGES_YEOJU, CLEAR_RANGES_SMC,
+    SHEET_NAME_FORMAT
+)
+from constants import PROBLEM_DATA_FILE, OVERTIME_RECORD_FILE
 from logger import Logger
 from gui import AttendanceGUI
 from data_analyzer import DataAnalyzer
 from attendance_engine import AttendanceEngine
 from excel_com import ExcelCOM
 from models import ProblemData
+from employee_manager import EmployeeManager
 
 
 class AttendanceProcessor:
     """근태 처리 메인 클래스"""
-    
+
     def __init__(self):
         """초기화"""
         self.logger = None
         self.gui = None
-        self.problem_file = "문제_데이터_확인.xlsx"
+        self.problem_file = PROBLEM_DATA_FILE
+        self.overtime_file = OVERTIME_RECORD_FILE
         self.current_files = {}  # 현재 처리 중인 파일 정보
+        self.employee_manager = EmployeeManager()  # 직원 관리자
     
     def run(self):
         """실행"""
@@ -102,11 +111,14 @@ class AttendanceProcessor:
             # ========== 5단계: 정상 데이터 입력 ==========
             self.logger.separator()
             self.logger.info("5단계: 정상 데이터 입력")
-            
-            engine = AttendanceEngine(pattern, self.logger)
-            
+
+            engine = AttendanceEngine(pattern, self.logger, self.employee_manager)
+
+            # 잔업 기록 수집을 위한 리스트
+            all_overtime_records = []
+
             # 여주 근태표
-            self._process_file(
+            overtime_records = self._process_file(
                 "여주",
                 yeoju_file,
                 YEOJU_BLOCKS,
@@ -116,9 +128,11 @@ class AttendanceProcessor:
                 engine,
                 base_date_obj
             )
-            
+            if overtime_records:
+                all_overtime_records.extend(overtime_records)
+
             # SMC 근태표
-            self._process_file(
+            overtime_records = self._process_file(
                 "SMC",
                 smc_file,
                 SMC_BLOCKS,
@@ -128,6 +142,14 @@ class AttendanceProcessor:
                 engine,
                 base_date_obj
             )
+            if overtime_records:
+                all_overtime_records.extend(overtime_records)
+
+            # ========== 5-1단계: 잔업 기록 저장 ==========
+            if all_overtime_records:
+                self.logger.separator()
+                self.logger.info("5-1단계: 잔업 기록 저장")
+                ExcelCOM.save_overtime_records(all_overtime_records, self.overtime_file, self.logger)
             
             # ========== 6단계: 문제 데이터 처리 ==========
             self.logger.separator()
@@ -162,7 +184,6 @@ class AttendanceProcessor:
             
         except Exception as e:
             self.logger.error(f"오류 발생: {str(e)}")
-            import traceback
             self.logger.error(traceback.format_exc())
             messagebox.showerror("오류", f"처리 중 오류가 발생했습니다:\n{str(e)}")
     
@@ -213,7 +234,7 @@ class AttendanceProcessor:
     ):
         """
         근태표 파일 처리
-        
+
         Args:
             name: 파일 이름 (로그용)
             file_path: 파일 경로
@@ -223,27 +244,34 @@ class AttendanceProcessor:
             yesterday_map: 전일 맵
             engine: 엔진
             base_date: 기준 날짜
+
+        Returns:
+            잔업 기록 리스트
         """
         self.logger.separator()
         self.logger.info(f"[{name} 근태표 처리]")
         self.logger.info(f"파일: {file_path}")
-        
+
         # 시트 이름 생성
         sheet_name = base_date.strftime(SHEET_NAME_FORMAT)
-        
+
+        overtime_records = []
+
         try:
             with ExcelCOM(file_path, self.logger) as excel:
                 # 시트 준비
                 excel.prepare_sheet(sheet_name, clear_ranges)
-                
-                # 데이터 입력
-                excel.write_attendance(blocks, today_map, yesterday_map, engine)
-                
+
+                # 데이터 입력 및 잔업 기록 수집
+                overtime_records = excel.write_attendance(blocks, today_map, yesterday_map, engine)
+
                 # 저장 (이미 prepare_sheet에서 저장되었지만 한 번 더)
                 excel.save()
-            
+
             self.logger.success(f"{name} 근태표 처리 완료")
-            
+
+            return overtime_records
+
         except Exception as e:
             self.logger.error(f"{name} 근태표 처리 실패: {str(e)}")
             raise
@@ -310,7 +338,6 @@ class AttendanceProcessor:
             
         except Exception as e:
             self.logger.error(f"재입력 실패: {str(e)}")
-            import traceback
             self.logger.error(traceback.format_exc())
             messagebox.showerror("오류", f"재입력 중 오류가 발생했습니다:\n{str(e)}")
     
@@ -345,7 +372,13 @@ class AttendanceProcessor:
                     
                     # 이름 찾아서 입력
                     found = False
-                    for name_range, in_range, out_range in blocks:
+                    for block_data in blocks:
+                        # 블록 데이터 언패킹 (하위 호환성 유지)
+                        if len(block_data) >= 3:
+                            name_range, in_range, out_range = block_data[0], block_data[1], block_data[2]
+                        else:
+                            continue
+
                         name_cells = excel.sheet.Range(name_range)
                         in_cells = excel.sheet.Range(in_range)
                         out_cells = excel.sheet.Range(out_range)
