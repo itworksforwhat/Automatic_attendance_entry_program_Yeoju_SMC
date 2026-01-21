@@ -2,11 +2,17 @@
 근태 자동 입력 v3.0 - 메인
 """
 import pandas as pd
+import traceback
 from datetime import datetime
 from tkinter import messagebox
 import os
 
-from config import *
+from config import (
+    YEOJU_BLOCKS, SMC_BLOCKS,
+    CLEAR_RANGES_YEOJU, CLEAR_RANGES_SMC,
+    SHEET_NAME_FORMAT
+)
+from constants import PROBLEM_DATA_FILE, OVERTIME_RECORD_FILE
 from logger import Logger
 from gui import AttendanceGUI
 from data_analyzer import DataAnalyzer
@@ -23,8 +29,8 @@ class AttendanceProcessor:
         """초기화"""
         self.logger = None
         self.gui = None
-        self.problem_file = "문제_데이터_확인.xlsx"
-        self.overtime_file = "잔업_기록.xlsx"
+        self.problem_file = PROBLEM_DATA_FILE
+        self.overtime_file = OVERTIME_RECORD_FILE
         self.current_files = {}  # 현재 처리 중인 파일 정보
         self.employee_manager = EmployeeManager()  # 직원 관리자
     
@@ -178,7 +184,6 @@ class AttendanceProcessor:
             
         except Exception as e:
             self.logger.error(f"오류 발생: {str(e)}")
-            import traceback
             self.logger.error(traceback.format_exc())
             messagebox.showerror("오류", f"처리 중 오류가 발생했습니다:\n{str(e)}")
     
@@ -333,7 +338,6 @@ class AttendanceProcessor:
             
         except Exception as e:
             self.logger.error(f"재입력 실패: {str(e)}")
-            import traceback
             self.logger.error(traceback.format_exc())
             messagebox.showerror("오류", f"재입력 중 오류가 발생했습니다:\n{str(e)}")
     

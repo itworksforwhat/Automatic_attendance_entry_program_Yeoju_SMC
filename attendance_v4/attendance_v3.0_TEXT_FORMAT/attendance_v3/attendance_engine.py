@@ -2,10 +2,11 @@
 근태 자동 입력 v3.0 - 출퇴근 처리 엔진
 """
 from datetime import datetime, date
-from typing import Dict, Tuple, Optional
-from models import AttendanceRecord, ProcessResult, WorkPattern, OvertimeRecord
+from typing import Dict, Optional
+from models import AttendanceRecord, ProcessResult, WorkPattern
 from overtime_calculator import OvertimeCalculator
 from employee_manager import EmployeeManager
+from constants import SHIFT_BOUNDARY_HOUR, AttendancePattern
 
 
 class AttendanceEngine:
@@ -129,14 +130,14 @@ class AttendanceEngine:
                 check_in=cin_today.strftime("%H:%M"),
                 check_out=cout_today.strftime("%H:%M"),
                 base_date=today.date,
-                pattern="today_complete",
+                pattern=AttendancePattern.TODAY_COMPLETE,
                 overtime=overtime
             )
         
         # 케이스 2: 오늘 출근만 있음 (퇴근 대기 또는 야간)
         if cin_today and not cout_today:
             # 오늘 출근이 주간 (0~12시)
-            if cin_today.hour < 12:
+            if cin_today.hour < SHIFT_BOUNDARY_HOUR:
                 # 전일 퇴근이 있으면 사용
                 if cout_yest:
                     overtime = self._calculate_overtime(name, dout_yest, cin_today, cout_yest)
@@ -144,7 +145,7 @@ class AttendanceEngine:
                         check_in=cin_today.strftime("%H:%M"),
                         check_out=cout_yest.strftime("%H:%M"),
                         base_date=dout_yest,
-                        pattern="today_checkin_with_prev_checkout",
+                        pattern=AttendancePattern.TODAY_CHECKIN_WITH_PREV_CHECKOUT,
                         overtime=overtime
                     )
                 else:
@@ -153,7 +154,7 @@ class AttendanceEngine:
                         check_in=cin_today.strftime("%H:%M"),
                         check_out="",
                         base_date=today.date,
-                        pattern="today_checkin_only"
+                        pattern=AttendancePattern.TODAY_CHECKIN_ONLY
                     )
             else:
                 # 야간 근무 (12시 이후 출근)
@@ -164,7 +165,7 @@ class AttendanceEngine:
                         check_in=cin_today.strftime("%H:%M"),
                         check_out=cout_yest.strftime("%H:%M"),
                         base_date=dout_yest,
-                        pattern="night_shift",
+                        pattern=AttendancePattern.NIGHT_SHIFT,
                         overtime=overtime
                     )
                 else:
@@ -172,7 +173,7 @@ class AttendanceEngine:
                         check_in=cin_today.strftime("%H:%M"),
                         check_out="",
                         base_date=today.date,
-                        pattern="night_shift_no_checkout"
+                        pattern=AttendancePattern.NIGHT_SHIFT_NO_CHECKOUT
                     )
         
         # 케이스 3: 오늘 퇴근만 있음 (전일 야간 근무)
@@ -184,7 +185,7 @@ class AttendanceEngine:
                     check_in=cin_yest.strftime("%H:%M"),
                     check_out=cout_today.strftime("%H:%M"),
                     base_date=yesterday.date,
-                    pattern="prev_night_shift",
+                    pattern=AttendancePattern.PREV_NIGHT_SHIFT,
                     overtime=overtime
                 )
             else:
@@ -192,7 +193,7 @@ class AttendanceEngine:
                     check_in="",
                     check_out=cout_today.strftime("%H:%M"),
                     base_date=today.date,
-                    pattern="checkout_only"
+                    pattern=AttendancePattern.CHECKOUT_ONLY
                 )
         
         # 케이스 4: 오늘 데이터 없음 - 전일 확인
@@ -200,14 +201,14 @@ class AttendanceEngine:
             # 전일 출근+퇴근 있음
             if cin_yest and cout_yest:
                 # 전일이 야간 근무인지 확인 (출근 12시 이후)
-                if cin_yest.hour >= 12:
+                if cin_yest.hour >= SHIFT_BOUNDARY_HOUR:
                     # 야간 근무자 → 출근+퇴근 모두 사용
                     overtime = self._calculate_overtime(name, dout_yest, cin_yest, cout_yest)
                     return ProcessResult(
                         check_in=cin_yest.strftime("%H:%M"),
                         check_out=cout_yest.strftime("%H:%M"),
                         base_date=dout_yest,
-                        pattern="prev_night_shift_complete",
+                        pattern=AttendancePattern.PREV_NIGHT_SHIFT_COMPLETE,
                         overtime=overtime
                     )
                 else:
@@ -216,7 +217,7 @@ class AttendanceEngine:
                         check_in="",
                         check_out=cout_yest.strftime("%H:%M"),
                         base_date=dout_yest,
-                        pattern="absent_with_prev_checkout"
+                        pattern=AttendancePattern.ABSENT_WITH_PREV_CHECKOUT
                     )
             
             # 전일 출근만 있음 → 완전 결근
@@ -225,7 +226,7 @@ class AttendanceEngine:
                     check_in="",
                     check_out="",
                     base_date=None,
-                    pattern="prev_checkin_only_no_data"
+                    pattern=AttendancePattern.PREV_CHECKIN_ONLY_NO_DATA
                 )
             
             # 전일 데이터 없음 → 완전 결근
@@ -233,7 +234,7 @@ class AttendanceEngine:
                 check_in="",
                 check_out="",
                 base_date=None,
-                pattern="no_data"
+                pattern=AttendancePattern.NO_DATA
             )
         
         # 기타 (도달하지 않아야 함)
@@ -241,5 +242,5 @@ class AttendanceEngine:
             check_in="",
             check_out="",
             base_date=None,
-            pattern="unknown"
+            pattern=AttendancePattern.UNKNOWN
         )

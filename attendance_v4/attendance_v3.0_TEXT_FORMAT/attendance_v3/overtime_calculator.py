@@ -4,6 +4,7 @@
 from datetime import datetime, date, time
 from typing import Optional, List, Tuple
 from models import OvertimeRecord, EmployeeType
+from constants import SHIFT_BOUNDARY_HOUR
 import config
 
 
@@ -103,10 +104,10 @@ class OvertimeCalculator:
         regular_minutes = self._time_to_minutes(regular_end)
 
         # 야간 근무의 경우 다음날 새벽까지이므로 특별 처리
-        if shift_type == "야간" and checkout_time_only.hour < 12:
+        if shift_type == "야간" and checkout_time_only.hour < SHIFT_BOUNDARY_HOUR:
             # 새벽 시간 (00:00~11:59)은 정규 근무 시간과 비교하기 위해 24시간 추가
             checkout_minutes += 24 * 60
-            regular_minutes += 24 * 60 if regular_end.hour < 12 else 0
+            regular_minutes += 24 * 60 if regular_end.hour < SHIFT_BOUNDARY_HOUR else 0
 
         # 정규 시간 이전 퇴근이면 잔업 없음
         if checkout_minutes <= regular_minutes:
@@ -143,7 +144,7 @@ class OvertimeCalculator:
             "주간" 또는 "야간"
         """
         # 12시 이후 출근이면 야간 근무
-        if checkin_time.hour >= 12:
+        if checkin_time.hour >= SHIFT_BOUNDARY_HOUR:
             return "야간"
         else:
             return "주간"

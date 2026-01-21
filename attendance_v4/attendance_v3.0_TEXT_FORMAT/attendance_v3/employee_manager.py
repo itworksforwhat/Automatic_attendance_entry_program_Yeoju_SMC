@@ -3,14 +3,15 @@
 """
 import json
 import os
-from typing import Dict, Optional
+from typing import Dict
 from models import EmployeeType
+from constants import EMPLOYEE_CONFIG_FILE
 
 
 class EmployeeManager:
     """직원 유형 관리자"""
 
-    def __init__(self, config_file: str = "employee_config.json"):
+    def __init__(self, config_file: str = EMPLOYEE_CONFIG_FILE):
         """
         초기화
 
