@@ -368,7 +368,13 @@ class AttendanceProcessor:
                     
                     # 이름 찾아서 입력
                     found = False
-                    for name_range, in_range, out_range in blocks:
+                    for block_data in blocks:
+                        # 블록 데이터 언패킹 (하위 호환성 유지)
+                        if len(block_data) >= 3:
+                            name_range, in_range, out_range = block_data[0], block_data[1], block_data[2]
+                        else:
+                            continue
+
                         name_cells = excel.sheet.Range(name_range)
                         in_cells = excel.sheet.Range(in_range)
                         out_cells = excel.sheet.Range(out_range)

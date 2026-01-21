@@ -238,13 +238,21 @@ class ExcelCOM:
             filled = 0
             processed = 0
 
-            for block_idx, (name_range, in_range, out_range) in enumerate(blocks, 1):
+            for block_idx, block_data in enumerate(blocks, 1):
+                # 블록 데이터 언패킹 (하위 호환성 유지)
+                if len(block_data) == 4:
+                    name_range, in_range, out_range, overtime_range = block_data
+                else:
+                    name_range, in_range, out_range = block_data
+                    overtime_range = None
+
                 self.logger.debug(f"블록 {block_idx}/{len(blocks)} 처리: {name_range}")
 
                 # 범위 가져오기
                 name_cells = self.sheet.Range(name_range)
                 in_cells = self.sheet.Range(in_range)
                 out_cells = self.sheet.Range(out_range)
+                overtime_cells = self.sheet.Range(overtime_range) if overtime_range else None
 
                 # 각 행 처리
                 for i in range(1, name_cells.Rows.Count + 1):
@@ -294,6 +302,11 @@ class ExcelCOM:
                         filled += 1
                     if result.check_out:
                         out_cells.Cells(i, 1).Value = "'" + result.check_out
+                        filled += 1
+
+                    # 잔업시간 기록 (숫자 형식으로)
+                    if overtime_cells and result.overtime:
+                        overtime_cells.Cells(i, 1).Value = result.overtime.overtime_hours
                         filled += 1
 
                     # 로그 (데이터 있을 때만)
