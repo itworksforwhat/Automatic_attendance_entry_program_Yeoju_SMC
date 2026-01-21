@@ -6,6 +6,7 @@
 from datetime import date
 from config import RESET_DATE, RERODE_DATA_YEOJU, RERODE_DATA_SMC
 import os
+import pandas as pd
 
 
 class ExcelCOM:
@@ -134,7 +135,7 @@ class ExcelCOM:
         except Exception as e:
             self.logger.warning(f"셀 지우기 실패: {str(e)}")
 
-    def write_attendance(self, blocks: list, today_map: dict, yesterday_map: dict, engine):
+    def write_attendance(self, blocks: list, today_map: dict, yesterday_map: dict, engine, collect_overtime=True):
         """
         출퇴근 데이터 입력
 
@@ -143,7 +144,13 @@ class ExcelCOM:
             today_map: 오늘 맵
             yesterday_map: 전일 맵
             engine: AttendanceEngine
+            collect_overtime: 잔업 데이터 수집 여부
+
+        Returns:
+            잔업 기록 리스트 (collect_overtime=True인 경우)
         """
+        overtime_records = []  # 잔업 기록 수집
+
         try:
             self.logger.info("출퇴근 데이터 입력 중...")
 
@@ -277,6 +284,10 @@ class ExcelCOM:
                     # 출퇴근 시간 결정
                     result = engine.decide_times(name, today_map, yesterday_map)
 
+                    # 잔업 정보 수집
+                    if collect_overtime and result.overtime:
+                        overtime_records.append(result.overtime)
+
                     # 셀에 쓰기 (텍스트 형식으로 강제)
                     if result.check_in:
                         in_cells.Cells(i, 1).Value = "'" + result.check_in
@@ -292,17 +303,22 @@ class ExcelCOM:
                             if result.base_date
                             else "N/A"
                         )
+                        overtime_str = f", 잔업={result.overtime.overtime_hours}시간" if result.overtime else ""
                         self.logger.info(
                             f"  {name}: 출근={result.check_in or '없음'}, "
                             f"퇴근={result.check_out or '없음'}, "
-                            f"날짜={date_str}, 패턴={result.pattern}"
+                            f"날짜={date_str}, 패턴={result.pattern}{overtime_str}"
                         )
 
             self.logger.separator()
             self.logger.success("출퇴근 데이터 입력 완료")
             self.logger.info(f"  처리: {processed}명")
             self.logger.info(f"  입력: {filled}건")
+            if collect_overtime and overtime_records:
+                self.logger.info(f"  잔업: {len(overtime_records)}건")
             self.logger.separator()
+
+            return overtime_records if collect_overtime else None
 
         except Exception as e:
             self.logger.error(f"데이터 입력 실패: {str(e)}")
@@ -338,3 +354,36 @@ class ExcelCOM:
 
         except Exception as e:
             self.logger.debug(f"Excel 종료 중 오류 (무시): {str(e)}")
+
+    @staticmethod
+    def save_overtime_records(overtime_records: list, output_path: str, logger):
+        """
+        잔업 기록을 Excel 파일로 저장
+
+        Args:
+            overtime_records: OvertimeRecord 리스트
+            output_path: 출력 파일 경로
+            logger: 로거
+        """
+        try:
+            if not overtime_records:
+                logger.info("저장할 잔업 기록이 없습니다.")
+                return
+
+            logger.info(f"잔업 기록 저장 중: {len(overtime_records)}건")
+
+            # OvertimeRecord를 딕셔너리로 변환
+            data = [record.to_dict() for record in overtime_records]
+
+            # DataFrame 생성
+            df = pd.DataFrame(data)
+
+            # Excel 파일로 저장
+            df.to_excel(output_path, index=False, engine='openpyxl')
+
+            logger.success(f"잔업 기록 저장 완료: {output_path}")
+            logger.info(f"  총 {len(overtime_records)}건의 잔업 기록")
+
+        except Exception as e:
+            logger.error(f"잔업 기록 저장 실패: {str(e)}")
+            raise

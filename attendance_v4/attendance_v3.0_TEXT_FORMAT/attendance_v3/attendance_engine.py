@@ -2,24 +2,76 @@
 근태 자동 입력 v3.0 - 출퇴근 처리 엔진
 """
 from datetime import datetime, date
-from typing import Dict, Tuple
-from models import AttendanceRecord, ProcessResult, WorkPattern
+from typing import Dict, Tuple, Optional
+from models import AttendanceRecord, ProcessResult, WorkPattern, OvertimeRecord
+from overtime_calculator import OvertimeCalculator
+from employee_manager import EmployeeManager
 
 
 class AttendanceEngine:
     """출퇴근 처리 엔진"""
-    
-    def __init__(self, pattern: WorkPattern, logger):
+
+    def __init__(self, pattern: WorkPattern, logger, employee_manager: Optional[EmployeeManager] = None):
         """
         초기화
-        
+
         Args:
             pattern: 근무 패턴
             logger: 로거
+            employee_manager: 직원 관리자 (없으면 기본 생성)
         """
         self.pattern = pattern
         self.logger = logger
-    
+        self.overtime_calculator = OvertimeCalculator()
+        self.employee_manager = employee_manager if employee_manager else EmployeeManager()
+
+    def _calculate_overtime(
+        self,
+        name: str,
+        target_date: date,
+        checkin_time: Optional[datetime],
+        checkout_time: Optional[datetime]
+    ) -> Optional[OvertimeRecord]:
+        """
+        잔업 시간 계산 헬퍼
+
+        Args:
+            name: 직원 이름
+            target_date: 날짜
+            checkin_time: 출근 시간
+            checkout_time: 퇴근 시간
+
+        Returns:
+            OvertimeRecord 또는 None
+        """
+        # 출퇴근 시간이 모두 있어야 계산 가능
+        if not checkin_time or not checkout_time:
+            return None
+
+        # 평일만 처리 (공휴일/주말 제외)
+        if not self.pattern.is_work_day(target_date):
+            return None
+
+        # 직원 유형 조회
+        employee_type = self.employee_manager.get_employee_type(name)
+
+        # 근무 유형 판단
+        shift_type = self.overtime_calculator.determine_shift_type(checkin_time)
+
+        # 잔업 계산
+        overtime = self.overtime_calculator.calculate_overtime(
+            name=name,
+            target_date=target_date,
+            checkout_time=checkout_time,
+            employee_type=employee_type,
+            shift_type=shift_type
+        )
+
+        if overtime:
+            self.logger.info(f"    잔업: {overtime.overtime_hours}시간 (석식: {'O' if overtime.meal_provided else 'X'})")
+
+        return overtime
+
     def decide_times(
         self,
         name: str,
@@ -72,11 +124,13 @@ class AttendanceEngine:
         
         # 케이스 1: 오늘 출근+퇴근 모두 있음
         if cin_today and cout_today:
+            overtime = self._calculate_overtime(name, today.date, cin_today, cout_today)
             return ProcessResult(
                 check_in=cin_today.strftime("%H:%M"),
                 check_out=cout_today.strftime("%H:%M"),
                 base_date=today.date,
-                pattern="today_complete"
+                pattern="today_complete",
+                overtime=overtime
             )
         
         # 케이스 2: 오늘 출근만 있음 (퇴근 대기 또는 야간)
@@ -85,11 +139,13 @@ class AttendanceEngine:
             if cin_today.hour < 12:
                 # 전일 퇴근이 있으면 사용
                 if cout_yest:
+                    overtime = self._calculate_overtime(name, dout_yest, cin_today, cout_yest)
                     return ProcessResult(
                         check_in=cin_today.strftime("%H:%M"),
                         check_out=cout_yest.strftime("%H:%M"),
                         base_date=dout_yest,
-                        pattern="today_checkin_with_prev_checkout"
+                        pattern="today_checkin_with_prev_checkout",
+                        overtime=overtime
                     )
                 else:
                     # 전일 퇴근 없음 - 출근만
@@ -103,11 +159,13 @@ class AttendanceEngine:
                 # 야간 근무 (12시 이후 출근)
                 # 전일 퇴근 사용
                 if cout_yest:
+                    overtime = self._calculate_overtime(name, dout_yest, cin_today, cout_yest)
                     return ProcessResult(
                         check_in=cin_today.strftime("%H:%M"),
                         check_out=cout_yest.strftime("%H:%M"),
                         base_date=dout_yest,
-                        pattern="night_shift"
+                        pattern="night_shift",
+                        overtime=overtime
                     )
                 else:
                     return ProcessResult(
@@ -121,11 +179,13 @@ class AttendanceEngine:
         if not cin_today and cout_today:
             # 전일 출근 사용
             if cin_yest:
+                overtime = self._calculate_overtime(name, yesterday.date, cin_yest, cout_today)
                 return ProcessResult(
                     check_in=cin_yest.strftime("%H:%M"),
                     check_out=cout_today.strftime("%H:%M"),
                     base_date=yesterday.date,
-                    pattern="prev_night_shift"
+                    pattern="prev_night_shift",
+                    overtime=overtime
                 )
             else:
                 return ProcessResult(
@@ -142,11 +202,13 @@ class AttendanceEngine:
                 # 전일이 야간 근무인지 확인 (출근 12시 이후)
                 if cin_yest.hour >= 12:
                     # 야간 근무자 → 출근+퇴근 모두 사용
+                    overtime = self._calculate_overtime(name, dout_yest, cin_yest, cout_yest)
                     return ProcessResult(
                         check_in=cin_yest.strftime("%H:%M"),
                         check_out=cout_yest.strftime("%H:%M"),
                         base_date=dout_yest,
-                        pattern="prev_night_shift_complete"
+                        pattern="prev_night_shift_complete",
+                        overtime=overtime
                     )
                 else:
                     # 주간 근무자 → 미출근 (퇴근만 사용)
