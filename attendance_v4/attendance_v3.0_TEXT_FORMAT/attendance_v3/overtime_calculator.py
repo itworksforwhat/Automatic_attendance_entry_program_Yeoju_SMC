@@ -115,7 +115,24 @@ class OvertimeCalculator:
 
         # 잔업 테이블에서 잔업 시간 찾기
         overtime_table = self._get_overtime_table(employee_type)
-        overtime_hours, meal_provided = self._find_overtime_hours(checkout_time_only, overtime_table)
+
+        # 야간 근무의 경우, 정규 퇴근 이후 시간을 주간 기준으로 변환
+        if shift_type == "야간":
+            # 정규 퇴근 이후 경과 시간 계산 (분 단위)
+            overtime_minutes = checkout_minutes - regular_minutes
+
+            # 주간 정규 퇴근 시간(17:40)에 경과 시간을 더해서 가상의 퇴근 시간 계산
+            day_end_minutes = self._time_to_minutes(self.day_shift_end)
+            virtual_checkout_minutes = day_end_minutes + overtime_minutes
+
+            # 가상 시간을 time 객체로 변환
+            virtual_hours = (virtual_checkout_minutes // 60) % 24
+            virtual_mins = virtual_checkout_minutes % 60
+            virtual_checkout_time = time(virtual_hours, virtual_mins)
+
+            overtime_hours, meal_provided = self._find_overtime_hours(virtual_checkout_time, overtime_table)
+        else:
+            overtime_hours, meal_provided = self._find_overtime_hours(checkout_time_only, overtime_table)
 
         # 잔업 시간이 0이면 잔업 기록 없음
         if overtime_hours == 0:
