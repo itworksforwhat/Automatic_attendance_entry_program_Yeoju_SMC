@@ -332,7 +332,8 @@ class DataAnalyzer:
                 base_date = datetime(1899, 12, 30)
                 dt = base_date + timedelta(days=value)
                 return dt, True
-            except:
+            except (ValueError, TypeError, OverflowError):
+                # 숫자 값이 유효한 날짜 범위가 아니거나 변환 실패
                 pass
         
         # 문자열 파싱 시도
@@ -368,7 +369,8 @@ class DataAnalyzer:
                     hour = int(value)
                     if 0 <= hour <= 23:
                         return datetime(2000, 1, 1, hour, 0), False  # 형식 오류
-                except:
+                except (ValueError, TypeError):
+                    # 숫자 변환 실패
                     pass
                 
                 return None, False  # 파싱 실패

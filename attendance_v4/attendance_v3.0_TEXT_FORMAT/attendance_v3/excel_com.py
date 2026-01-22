@@ -4,7 +4,9 @@
 """
 
 from datetime import date
+from typing import List, Dict, Tuple, Optional
 from config import RESET_DATE, RERODE_DATA_YEOJU, RERODE_DATA_SMC
+from constants import YEOJU_FILE_KEYWORDS, SMC_FILE_KEYWORDS, YEOJU_REFERENCE_CELL, SMC_REFERENCE_CELL
 import os
 import pandas as pd
 
@@ -96,7 +98,8 @@ class ExcelCOM:
                 self.logger.info(f"시트 '{new_name}' 이미 존재 - 기존 시트 사용")
                 self.sheet = existing
                 return
-            except:
+            except Exception:
+                # 시트가 존재하지 않으면 새로 생성
                 pass
 
             # 시트 복사
@@ -135,12 +138,196 @@ class ExcelCOM:
         except Exception as e:
             self.logger.warning(f"셀 지우기 실패: {str(e)}")
 
-    def write_attendance(self, blocks: list, today_map: dict, yesterday_map: dict, engine, collect_overtime=True):
+    def _determine_file_type(self) -> Tuple[bool, bool]:
         """
-        출퇴근 데이터 입력
+        파일명 기반 여주/SMC 구분
+
+        Returns:
+            (is_yeoju, is_smc) 튜플
+        """
+        path_lower = self.file_path.lower()
+        is_yeoju = any(keyword in path_lower for keyword in YEOJU_FILE_KEYWORDS)
+        is_smc = any(keyword in path_lower for keyword in SMC_FILE_KEYWORDS)
+        self.logger.debug(f"is_yeoju={is_yeoju}, is_smc={is_smc}")
+        return is_yeoju, is_smc
+
+    def _get_base_date(self, engine) -> date:
+        """
+        기준일 계산
 
         Args:
-            blocks: [(이름범위, 출근범위, 퇴근범위), ...]
+            engine: AttendanceEngine
+
+        Returns:
+            기준 날짜
+        """
+        base_date = getattr(engine, "base_date", None)
+        if base_date is None:
+            base_date = date.today()
+        return base_date
+
+    def _get_previous_sheet_name(self) -> Optional[str]:
+        """
+        이전 시트 이름 가져오기
+
+        Returns:
+            이전 시트 이름 또는 None
+        """
+        try:
+            if self.sheet.Index > 1:
+                prev_sheet = self.workbook.Worksheets(self.sheet.Index - 1)
+                prev_sheet_name = prev_sheet.Name
+                self.logger.debug(f"이전 시트 이름: {prev_sheet_name!r}")
+                return prev_sheet_name
+            else:
+                self.logger.debug("이전 시트 없음 (첫 번째 시트)")
+                return None
+        except Exception as e:
+            self.logger.warning(f"이전 시트 이름 가져오기 실패: {e}")
+            return None
+
+    def _write_reset_date(self, reset_date_str: str):
+        """
+        RESET_DATE 셀에 기준일 쓰기
+
+        Args:
+            reset_date_str: 날짜 문자열 (YYYY-MM-DD)
+        """
+        for addr in RESET_DATE:
+            try:
+                self.sheet.Range(addr).Value = reset_date_str
+                self.logger.debug(f"RESET_DATE: {addr} <- {reset_date_str}")
+            except Exception as e:
+                self.logger.warning(f"RESET_DATE 입력 실패 ({addr}): {e}")
+
+    def _write_reference_formula(self, is_yeoju: bool, is_smc: bool, prev_sheet_name: Optional[str]):
+        """
+        RERODE_DATA 수식 설정
+
+        Args:
+            is_yeoju: 여주 파일 여부
+            is_smc: SMC 파일 여부
+            prev_sheet_name: 이전 시트 이름
+        """
+        if not prev_sheet_name:
+            return
+
+        # 여주 전용
+        if is_yeoju:
+            for addr in RERODE_DATA_YEOJU:
+                try:
+                    formula = f"='{prev_sheet_name}'!{YEOJU_REFERENCE_CELL}"
+                    self.sheet.Range(addr).Formula = formula
+                    self.logger.debug(f"RERODE_DATA_YEOJU: {addr} <- {formula}")
+                except Exception as e:
+                    self.logger.warning(f"RERODE_DATA_YEOJU 수식 입력 실패 ({addr}): {e}")
+
+        # SMC 전용
+        if is_smc:
+            for addr in RERODE_DATA_SMC:
+                try:
+                    formula = f"='{prev_sheet_name}'!{SMC_REFERENCE_CELL}"
+                    self.sheet.Range(addr).Formula = formula
+                    self.logger.debug(f"RERODE_DATA_SMC: {addr} <- {formula}")
+                except Exception as e:
+                    self.logger.warning(f"RERODE_DATA_SMC 수식 입력 실패 ({addr}): {e}")
+
+    def _process_attendance_blocks(
+        self,
+        blocks: list,
+        today_map: dict,
+        yesterday_map: dict,
+        engine,
+        collect_overtime: bool
+    ) -> Tuple[List, int, int]:
+        """
+        출퇴근 데이터 블록 처리
+
+        Args:
+            blocks: 블록 리스트
+            today_map: 오늘 맵
+            yesterday_map: 전일 맵
+            engine: AttendanceEngine
+            collect_overtime: 잔업 수집 여부
+
+        Returns:
+            (잔업_기록_리스트, 입력_건수, 처리_인원수) 튜플
+        """
+        overtime_records = []
+        filled = 0
+        processed = 0
+
+        for block_idx, block_data in enumerate(blocks, 1):
+            # 블록 데이터 언패킹
+            if len(block_data) == 4:
+                name_range, in_range, out_range, overtime_range = block_data
+            else:
+                name_range, in_range, out_range = block_data
+                overtime_range = None
+
+            self.logger.debug(f"블록 {block_idx}/{len(blocks)} 처리: {name_range}")
+
+            # 범위 가져오기
+            name_cells = self.sheet.Range(name_range)
+            in_cells = self.sheet.Range(in_range)
+            out_cells = self.sheet.Range(out_range)
+            overtime_cells = self.sheet.Range(overtime_range) if overtime_range else None
+
+            # 각 행 처리
+            for i in range(1, name_cells.Rows.Count + 1):
+                processed += 1
+
+                name = str(name_cells.Cells(i, 1).Value or "").strip()
+                if not name or name == "None":
+                    continue
+
+                # 이름 정규화 및 맵에서 찾기
+                name_normalized = name.replace(" ", "").lower()
+                found_in_today = any(k.replace(" ", "").lower() == name_normalized for k in today_map.keys())
+                found_in_yesterday = any(k.replace(" ", "").lower() == name_normalized for k in yesterday_map.keys())
+
+                if not found_in_today and not found_in_yesterday:
+                    self.logger.warning(f"    '{name}': 원시 데이터에서 찾을 수 없음")
+                    continue
+
+                # 출퇴근 시간 결정
+                result = engine.decide_times(name, today_map, yesterday_map)
+
+                # 잔업 정보 수집
+                if collect_overtime and result.overtime:
+                    overtime_records.append(result.overtime)
+
+                # 출퇴근 시간 기록
+                if result.check_in:
+                    in_cells.Cells(i, 1).Value = "'" + result.check_in
+                    filled += 1
+                if result.check_out:
+                    out_cells.Cells(i, 1).Value = "'" + result.check_out
+                    filled += 1
+
+                # 잔업시간 기록
+                if overtime_cells and result.overtime:
+                    overtime_cells.Cells(i, 1).Value = result.overtime.overtime_hours
+                    filled += 1
+
+                # 로그 출력
+                if result.check_in or result.check_out:
+                    date_str = result.base_date.strftime("%Y-%m-%d") if result.base_date else "N/A"
+                    overtime_str = f", 잔업={result.overtime.overtime_hours}시간" if result.overtime else ""
+                    self.logger.info(
+                        f"  {name}: 출근={result.check_in or '없음'}, "
+                        f"퇴근={result.check_out or '없음'}, "
+                        f"날짜={date_str}, 패턴={result.pattern}{overtime_str}"
+                    )
+
+        return overtime_records, filled, processed
+
+    def write_attendance(self, blocks: list, today_map: dict, yesterday_map: dict, engine, collect_overtime=True):
+        """
+        출퇴근 데이터 입력 (조율자 메서드)
+
+        Args:
+            blocks: [(이름범위, 출근범위, 퇴근범위, 잔업범위), ...]
             today_map: 오늘 맵
             yesterday_map: 전일 맵
             engine: AttendanceEngine
@@ -149,180 +336,32 @@ class ExcelCOM:
         Returns:
             잔업 기록 리스트 (collect_overtime=True인 경우)
         """
-        overtime_records = []  # 잔업 기록 수집
-
         try:
             self.logger.info("출퇴근 데이터 입력 중...")
 
-            # === 0) 파일명 기준 여주 / SMC 구분 ===
-            path_lower = self.file_path.lower()
-            is_yeoju = ("yj" in path_lower) or ("여주" in path_lower) or ("yeoju" in path_lower)
-            is_smc   = ("smc" in path_lower)
+            # 1) 파일 유형 판단
+            is_yeoju, is_smc = self._determine_file_type()
 
-            self.logger.debug(f"is_yeoju={is_yeoju}, is_smc={is_smc}")
-
-            # === 1) 기준일 계산 ===
-            base_date = getattr(engine, "base_date", None)
-            if base_date is None:
-                base_date = date.today()
-
-            # RESET_DATE용: YYYY-MM-DD 형식
+            # 2) 기준일 계산
+            base_date = self._get_base_date(engine)
             reset_date_str = base_date.strftime("%Y-%m-%d")
+            self.logger.debug(f"기준일: {reset_date_str}")
 
-            # === 1-1) 현재 시트/이전 시트 이름 가져오기 ===
-            cur_sheet = self.sheet
-            wb = self.workbook
-            prev_sheet_name = None
+            # 3) 이전 시트 이름 가져오기
+            prev_sheet_name = self._get_previous_sheet_name()
 
-            try:
-                if cur_sheet.Index > 1:
-                    prev_sheet = wb.Worksheets(cur_sheet.Index - 1)
-                    prev_sheet_name = prev_sheet.Name
-                    self.logger.debug(f"이전 시트 이름: {prev_sheet_name!r}")
-                else:
-                    self.logger.debug("이전 시트 없음 (첫 번째 시트)")
-            except Exception as e:
-                self.logger.warning(f"이전 시트 이름 가져오기 실패: {e}")
+            # 4) RESET_DATE 셀에 날짜 쓰기
+            self._write_reset_date(reset_date_str)
 
-            self.logger.debug(
-                f"기준일: {reset_date_str}, 이전 시트: {prev_sheet_name}"
+            # 5) RERODE_DATA 수식 설정
+            self._write_reference_formula(is_yeoju, is_smc, prev_sheet_name)
+
+            # 6) 출퇴근 데이터 블록 처리
+            overtime_records, filled, processed = self._process_attendance_blocks(
+                blocks, today_map, yesterday_map, engine, collect_overtime
             )
 
-            # === 2) RESET_DATE 셀들에 기준일 쓰기 (여주/SMC 공통) ===
-            for addr in RESET_DATE:
-                try:
-                    self.sheet.Range(addr).Value = reset_date_str
-                    self.logger.debug(f"RESET_DATE: {addr} <- {reset_date_str}")
-                except Exception as e:
-                    self.logger.warning(f"RESET_DATE 입력 실패 ({addr}): {e}")
-
-            # === 3) 여주 전용: 이전 시트의 W37 참조 ===
-            if is_yeoju and prev_sheet_name:
-                for addr in RERODE_DATA_YEOJU:
-                    try:
-                        ref_addr = "W37"  # 여주에서 참조할 셀 주소
-                        formula = f"='{prev_sheet_name}'!{ref_addr}"
-
-                        self.logger.debug(f"prev_sheet_name raw: {repr(prev_sheet_name)}")
-                        self.logger.debug(f"formula: {repr(formula)}")
-
-                        cell = self.sheet.Range(addr)
-                        cell.Formula = formula
-                        self.logger.debug(f"RERODE_DATA_YEOJU: {addr} <- {cell.Formula}")
-
-                    except Exception as e:
-                        self.logger.warning(
-                            f"RERODE_DATA_YEOJU 수식 입력 실패 ({addr}): {e}"
-                        )
-
-            # === 4) SMC 전용: 이전 시트의 T31 참조 ===
-            if is_smc and prev_sheet_name:
-                for addr in RERODE_DATA_SMC:
-                    try:
-                        ref_addr = "T31"  # SMC에서 참조할 셀 주소
-                        formula = f"='{prev_sheet_name}'!{ref_addr}"
-
-                        self.logger.debug(f"prev_sheet_name raw: {repr(prev_sheet_name)}")
-                        self.logger.debug(f"formula: {repr(formula)}")
-
-                        cell = self.sheet.Range(addr)
-                        cell.Formula = formula
-                        self.logger.debug(f"RERODE_DATA_SMC: {addr} <- {cell.Formula}")
-
-                    except Exception as e:
-                        self.logger.warning(
-                            f"RERODE_DATA_SMC 수식 입력 실패 ({addr}): {e}"
-                        )
-
-            # === 5) 기존 출퇴근 입력 로직 ===
-            filled = 0
-            processed = 0
-
-            for block_idx, block_data in enumerate(blocks, 1):
-                # 블록 데이터 언패킹 (하위 호환성 유지)
-                if len(block_data) == 4:
-                    name_range, in_range, out_range, overtime_range = block_data
-                else:
-                    name_range, in_range, out_range = block_data
-                    overtime_range = None
-
-                self.logger.debug(f"블록 {block_idx}/{len(blocks)} 처리: {name_range}")
-
-                # 범위 가져오기
-                name_cells = self.sheet.Range(name_range)
-                in_cells = self.sheet.Range(in_range)
-                out_cells = self.sheet.Range(out_range)
-                overtime_cells = self.sheet.Range(overtime_range) if overtime_range else None
-
-                # 각 행 처리
-                for i in range(1, name_cells.Rows.Count + 1):
-                    processed += 1
-
-                    name = str(name_cells.Cells(i, 1).Value or "").strip()
-                    if not name or name == "None":
-                        continue
-
-                    # 디버깅: 이름 출력
-                    self.logger.debug(f"  처리 중: '{name}'")
-
-                    # 맵에서 이름 찾기 (대소문자 무시, 공백 제거)
-                    name_normalized = name.replace(" ", "").lower()
-
-                    found_in_today = False
-                    found_in_yesterday = False
-
-                    for map_name in today_map.keys():
-                        if map_name.replace(" ", "").lower() == name_normalized:
-                            found_in_today = True
-                            self.logger.debug(f"    오늘 맵에서 발견: '{map_name}'")
-                            break
-
-                    for map_name in yesterday_map.keys():
-                        if map_name.replace(" ", "").lower() == name_normalized:
-                            found_in_yesterday = True
-                            self.logger.debug(f"    전일 맵에서 발견: '{map_name}'")
-                            break
-
-                    if not found_in_today and not found_in_yesterday:
-                        self.logger.warning(
-                            f"    '{name}': 원시 데이터에서 찾을 수 없음"
-                        )
-                        continue
-
-                    # 출퇴근 시간 결정
-                    result = engine.decide_times(name, today_map, yesterday_map)
-
-                    # 잔업 정보 수집
-                    if collect_overtime and result.overtime:
-                        overtime_records.append(result.overtime)
-
-                    # 셀에 쓰기 (텍스트 형식으로 강제)
-                    if result.check_in:
-                        in_cells.Cells(i, 1).Value = "'" + result.check_in
-                        filled += 1
-                    if result.check_out:
-                        out_cells.Cells(i, 1).Value = "'" + result.check_out
-                        filled += 1
-
-                    # 잔업시간 기록 (숫자 형식으로)
-                    if overtime_cells and result.overtime:
-                        overtime_cells.Cells(i, 1).Value = result.overtime.overtime_hours
-                        filled += 1
-
-                    # 로그 (데이터 있을 때만)
-                    if result.check_in or result.check_out:
-                        date_str = (
-                            result.base_date.strftime("%Y-%m-%d")
-                            if result.base_date
-                            else "N/A"
-                        )
-                        overtime_str = f", 잔업={result.overtime.overtime_hours}시간" if result.overtime else ""
-                        self.logger.info(
-                            f"  {name}: 출근={result.check_in or '없음'}, "
-                            f"퇴근={result.check_out or '없음'}, "
-                            f"날짜={date_str}, 패턴={result.pattern}{overtime_str}"
-                        )
-
+            # 7) 결과 로깅
             self.logger.separator()
             self.logger.success("출퇴근 데이터 입력 완료")
             self.logger.info(f"  처리: {processed}명")

@@ -3,6 +3,7 @@
 """
 import json
 import os
+import warnings
 from typing import Dict
 from models import EmployeeType
 from constants import EMPLOYEE_CONFIG_FILE
@@ -36,7 +37,7 @@ class EmployeeManager:
                             # 잘못된 타입은 기본값으로
                             self.employee_types[name] = EmployeeType.NORMAL
             except Exception as e:
-                print(f"설정 파일 로드 실패: {e}")
+                warnings.warn(f"설정 파일 로드 실패: {e}")
                 self.employee_types = {}
 
     def save_config(self):
@@ -47,7 +48,7 @@ class EmployeeManager:
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"설정 파일 저장 실패: {e}")
+            warnings.warn(f"설정 파일 저장 실패: {e}")
 
     def get_employee_type(self, name: str) -> EmployeeType:
         """

@@ -105,7 +105,7 @@ class AttendanceGUI:
         # 날짜 검증
         try:
             datetime.strptime(self.base_date.get(), "%Y-%m-%d")
-        except:
+        except ValueError:
             messagebox.showerror("오류", "날짜 형식이 올바르지 않습니다. (YYYY-MM-DD)")
             return
         
