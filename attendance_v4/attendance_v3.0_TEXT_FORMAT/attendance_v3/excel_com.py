@@ -286,6 +286,12 @@ class ExcelCOM:
                 found_in_today = any(k.replace(" ", "").lower() == name_normalized for k in today_map.keys())
                 found_in_yesterday = any(k.replace(" ", "").lower() == name_normalized for k in yesterday_map.keys())
 
+                # 디버깅: 첫 번째 블록의 첫 번째 이름만 상세 출력
+                if block_idx == 1 and i == 1:
+                    self.logger.debug(f"    [디버깅] Excel에서 읽은 이름: '{name}' (정규화: '{name_normalized}')")
+                    self.logger.debug(f"    [디버깅] today_map 키 샘플: {list(today_map.keys())[:3]}")
+                    self.logger.debug(f"    [디버깅] found_in_today={found_in_today}, found_in_yesterday={found_in_yesterday}")
+
                 if not found_in_today and not found_in_yesterday:
                     self.logger.warning(f"    '{name}': 원시 데이터에서 찾을 수 없음")
                     continue

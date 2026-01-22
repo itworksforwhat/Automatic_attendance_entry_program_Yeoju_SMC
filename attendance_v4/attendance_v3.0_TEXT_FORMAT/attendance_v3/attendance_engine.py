@@ -92,30 +92,35 @@ class AttendanceEngine:
         """
         # 이름 정규화 (공백 제거, 소문자 변환)
         name_normalized = name.replace(" ", "").lower()
-        
+
         # 오늘/전일 데이터 가져오기 (정규화된 이름으로 매칭)
         today = None
         yesterday = None
-        
+
         for key, value in today_map.items():
             if key.replace(" ", "").lower() == name_normalized:
                 today = value
                 break
-        
+
         for key, value in yesterday_map.items():
             if key.replace(" ", "").lower() == name_normalized:
                 yesterday = value
                 break
-        
+
+        # 디버깅: today가 None이면 상세 로그 출력
+        if today is None:
+            self.logger.debug(f"    [디버깅] '{name}' (정규화: '{name_normalized}')를 today_map에서 찾지 못함")
+            self.logger.debug(f"    [디버깅] today_map 전체 키: {list(today_map.keys())}")
+
         # 편의상 변수 추출
         cin_today = today.check_in if today else None
         cout_today = today.check_out if today else None
         cin_yest = yesterday.check_in if yesterday else None
         cout_yest = yesterday.check_out if yesterday else None
-        
+
         # 퇴근 날짜는 퇴근 시간의 날짜를 사용 (야간 근무 고려)
         dout_yest = cout_yest.date() if cout_yest else (yesterday.date if yesterday else None)
-        
+
         # 디버깅
         self.logger.debug(f"    출퇴근 시간: cin_today={cin_today}, cout_today={cout_today}")
         self.logger.debug(f"    전일: cin_yest={cin_yest}, cout_yest={cout_yest}")
