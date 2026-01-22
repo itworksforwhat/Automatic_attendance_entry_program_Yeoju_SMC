@@ -339,18 +339,28 @@ class DataAnalyzer:
         # 문자열 파싱 시도
         if isinstance(value, str):
             value = value.strip()
-            
+
             try:
-                # "YYYY/MM/DD HH:MM" 형식 (원시 데이터의 실제 형식!)
+                # "YYYY/MM/DD HH:MM:SS" 형식 (초 포함)
                 if '/' in value and ' ' in value:
-                    dt = datetime.strptime(value, "%Y/%m/%d %H:%M")
-                    return dt, True
-                
-                # "YYYY-MM-DD HH:MM" 형식
+                    try:
+                        dt = datetime.strptime(value, "%Y/%m/%d %H:%M:%S")
+                        return dt, True
+                    except ValueError:
+                        # 초가 없는 형식 시도
+                        dt = datetime.strptime(value, "%Y/%m/%d %H:%M")
+                        return dt, True
+
+                # "YYYY-MM-DD HH:MM:SS" 형식 (초 포함)
                 if '-' in value and ' ' in value:
-                    dt = datetime.strptime(value, "%Y-%m-%d %H:%M")
-                    return dt, True
-                
+                    try:
+                        dt = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+                        return dt, True
+                    except ValueError:
+                        # 초가 없는 형식 시도
+                        dt = datetime.strptime(value, "%Y-%m-%d %H:%M")
+                        return dt, True
+
                 # "HH:MM" 형식 (시간만)
                 if ':' in value and '/' not in value and '-' not in value:
                     parts = value.split(':')
@@ -358,12 +368,12 @@ class DataAnalyzer:
                         hour = int(parts[0])
                         minute = int(parts[1])
                         return datetime(2000, 1, 1, hour, minute), True
-                
+
                 # "8시" 형식
                 if '시' in value:
                     hour = int(value.replace('시', '').strip())
                     return datetime(2000, 1, 1, hour, 0), False  # 형식 오류
-                
+
                 # 숫자만
                 try:
                     hour = int(value)
@@ -372,12 +382,12 @@ class DataAnalyzer:
                 except (ValueError, TypeError):
                     # 숫자 변환 실패
                     pass
-                
+
                 return None, False  # 파싱 실패
-                
+
             except Exception:
                 return None, False  # 파싱 실패
-        
+
         return None, False  # 기타 타입
     
     def _check_issues(self, cin: datetime, cout: datetime, cin_ok: bool, cout_ok: bool) -> str:
