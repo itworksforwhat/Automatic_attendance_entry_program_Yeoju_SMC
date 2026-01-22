@@ -262,6 +262,9 @@ class AttendanceProcessor:
                 # 시트 준비
                 excel.prepare_sheet(sheet_name, clear_ranges)
 
+                # 엔진에 기준 날짜 설정
+                engine.base_date = base_date
+
                 # 데이터 입력 및 잔업 기록 수집
                 overtime_records = excel.write_attendance(blocks, today_map, yesterday_map, engine)
 
