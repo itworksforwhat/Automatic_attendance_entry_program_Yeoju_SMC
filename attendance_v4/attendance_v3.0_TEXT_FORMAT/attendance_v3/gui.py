@@ -4,8 +4,6 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext
 from datetime import datetime
-import pandas as pd
-import os
 
 
 class AttendanceGUI:
@@ -90,44 +88,6 @@ class AttendanceGUI:
         filename = filedialog.askopenfilename(title=title, filetypes=filetypes)
         if filename:
             var.set(filename)
-
-            # 원시 데이터 파일 선택 시 기준 날짜 자동 설정
-            if var == self.raw_file:
-                self._auto_set_base_date(filename)
-
-    def _auto_set_base_date(self, filename: str):
-        """
-        원시 데이터 파일에서 최신 날짜를 추출하여 기준 날짜 자동 설정
-
-        Args:
-            filename: 원시 데이터 파일 경로
-        """
-        try:
-            # Excel 파일 읽기
-            df = pd.read_excel(filename)
-
-            # 날짜 컬럼 찾기 (여러 가능한 이름 시도)
-            date_col = None
-            for col in ['근무일자', '날짜', '일자', 'date', 'Date']:
-                if col in df.columns:
-                    date_col = col
-                    break
-
-            if date_col is None:
-                # 날짜 컬럼을 찾지 못하면 기본값 유지
-                return
-
-            # 날짜 컬럼을 datetime으로 변환 후 최신 날짜 찾기
-            df[date_col] = pd.to_datetime(df[date_col])
-            max_date = df[date_col].max()
-
-            if pd.notna(max_date):
-                # 기준 날짜 설정
-                self.base_date.set(max_date.strftime("%Y-%m-%d"))
-
-        except Exception:
-            # 오류 발생 시 기본값 유지
-            pass
 
     def _on_execute_click(self):
         """실행 버튼 클릭"""
