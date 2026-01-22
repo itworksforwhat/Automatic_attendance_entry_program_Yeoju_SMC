@@ -431,21 +431,33 @@ class DataAnalyzer:
         df_day = df[df[COL_DATE] == target_date].copy()
         
         result = {}
+        first_record = True
         for idx, row in df_day.iterrows():
             name = str(row[COL_NAME]).strip()
-            
+
             if not name or name == 'nan':
                 continue
-            
+
             # 시간 파싱
-            cin_parsed, _ = self._parse_time(row[COL_IN_RAW])
-            cout_parsed, _ = self._parse_time(row[COL_OUT_RAW])
-            
+            cin_raw = row[COL_IN_RAW]
+            cout_raw = row[COL_OUT_RAW]
+            cin_parsed, _ = self._parse_time(cin_raw)
+            cout_parsed, _ = self._parse_time(cout_raw)
+
+            # 디버깅: 첫 번째 레코드만 상세 출력
+            if first_record:
+                self.logger.debug(f"[디버깅] 첫 번째 레코드 - 이름: '{name}', 날짜: {target_date}")
+                self.logger.debug(f"[디버깅] 원본 출근시간 값: {cin_raw} (타입: {type(cin_raw).__name__})")
+                self.logger.debug(f"[디버깅] 원본 퇴근시간 값: {cout_raw} (타입: {type(cout_raw).__name__})")
+                self.logger.debug(f"[디버깅] 파싱된 출근시간: {cin_parsed}")
+                self.logger.debug(f"[디버깅] 파싱된 퇴근시간: {cout_parsed}")
+                first_record = False
+
             result[name] = AttendanceRecord(
                 name=name,
                 date=target_date,
                 check_in=cin_parsed,
                 check_out=cout_parsed,
             )
-        
+
         return result
